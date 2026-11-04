@@ -1,6 +1,6 @@
 # Spring Boot Observability Lab
 
-A local teaching system for understanding how Spring applications generate metrics, traces, and structured logs, and how Prometheus, Jaeger, Loki, Alloy, Alertmanager, and Grafana process those signals. It deliberately keeps the business domain small: an order is stored in PostgreSQL before a synchronous simulated payment request. It excludes real payment integration, authentication, production deployment, and automatic retries.
+A simple microservices project for understanding how Spring applications generate metrics, traces, and structured logs, and how Prometheus, Jaeger, Loki, Alloy, Alertmanager, and Grafana process those signals. It deliberately keeps the business domain small: an order is stored in PostgreSQL before a synchronous simulated payment request. It excludes real payment integration, authentication, production deployment, and automatic retries.
 
 ## Architecture
 
