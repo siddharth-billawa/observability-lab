@@ -1,0 +1,95 @@
+name: observability-lab
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: observability
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab}
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck: {test: [CMD-SHELL, pg_isready -U lab -d observability], interval: 5s, timeout: 3s, retries: 20}
+  order-service:
+    image: observability-lab/order-service:1.0.0
+    build: ./apps/order-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/observability
+      SPRING_DATASOURCE_USERNAME: lab
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-lab}
+      PAYMENT_BASE_URL: http://payment-service:8081
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+      SPRING_PROFILES_ACTIVE: local
+      DEMO_ENABLED: "true"
+    ports: ["${ORDER_PORT:-18080}:8080"]
+    depends_on: {postgres: {condition: service_healthy}, payment-service: {condition: service_healthy}}
+    healthcheck: {test: [CMD, wget, -q, -O, /dev/null, http://localhost:8080/actuator/health], interval: 10s, timeout: 3s, retries: 15, start_period: 30s}
+  payment-service:
+    image: observability-lab/payment-service:1.0.0
+    build: ./apps/payment-service
+    environment:
+      SERVER_PORT: 8081
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+      SPRING_PROFILES_ACTIVE: local
+      DEMO_ENABLED: "true"
+      PAYMENT_DELAY_MS: ${PAYMENT_DELAY_MS:-0}
+      PAYMENT_FAIL: ${PAYMENT_FAIL:-false}
+    ports: ["${PAYMENT_PORT:-18081}:8081"]
+    healthcheck: {test: [CMD, wget, -q, -O, /dev/null, http://localhost:8081/actuator/health], interval: 10s, timeout: 3s, retries: 15, start_period: 25s}
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.path=/prometheus, --storage.tsdb.retention.time=7d, --web.enable-lifecycle]
+    volumes: [./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro, ./infra/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro, prometheus-data:/prometheus]
+    ports: ["9090:9090"]
+    depends_on: [order-service, payment-service, alertmanager, alert-sink]
+  alert-sink:
+    image: observability-lab/alert-sink:1.0.0
+    build: ./infra/alert-sink
+    expose: ["8090"]
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    command: [--config.file=/etc/alertmanager/alertmanager.yml, --storage.path=/alertmanager]
+    volumes: [./infra/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro, alertmanager-data:/alertmanager]
+    ports: ["9093:9093"]
+  grafana:
+    image: grafana/grafana:12.0.2
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes: [grafana-data:/var/lib/grafana, ./infra/grafana/provisioning:/etc/grafana/provisioning:ro, ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro]
+    ports: ["3000:3000"]
+    depends_on: [prometheus, loki]
+  jaeger:
+    image: jaegertracing/all-in-one:1.72.0
+    environment: [COLLECTOR_OTLP_ENABLED=true]
+    ports: ["16686:16686"]
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.130.0
+    command: [--config=/etc/otelcol-contrib/config.yaml]
+    volumes: [./infra/otel-collector/config.yml:/etc/otelcol-contrib/config.yaml:ro]
+    ports: ["4317:4317", "4318:4318"]
+    depends_on: [jaeger]
+  loki:
+    image: grafana/loki:3.5.3
+    command: [-config.file=/etc/loki/config.yml]
+    volumes: [./infra/loki/config.yml:/etc/loki/config.yml:ro, loki-data:/loki]
+    ports: ["3100:3100"]
+  alloy:
+    image: grafana/alloy:v1.10.2
+    command: [run, --server.http.listen-addr=0.0.0.0:12345, /etc/alloy/config.alloy]
+    volumes: [./infra/alloy/config.alloy:/etc/alloy/config.alloy:ro, /var/run/docker.sock:/var/run/docker.sock:ro, alloy-data:/var/lib/alloy]
+    ports: ["12345:12345"]
+    depends_on: [loki]
+  k6:
+    image: grafana/k6:1.1.0
+    profiles: [load]
+    volumes: [./load-tests:/scripts:ro]
+    entrypoint: [k6]
+    environment: [BASE_URL=http://order-service:8080]
+    depends_on: [order-service]
+volumes:
+  postgres-data: {}
+  prometheus-data: {}
+  grafana-data: {}
+  loki-data: {}
+  alertmanager-data: {}
+  alloy-data: {}

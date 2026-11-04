@@ -1,0 +1,18 @@
+global:
+  # Ten-second intervals keep the local lab responsive without high scrape overhead.
+  scrape_interval: 10s
+  evaluation_interval: 10s
+  external_labels: {environment: local}
+rule_files: [/etc/prometheus/alerts.yml]
+alerting:
+  alertmanagers: [{static_configs: [{targets: [alertmanager:9093]}]}]
+scrape_configs:
+  # Both apps expose the standard Actuator Prometheus endpoint on the Compose network.
+  - job_name: prometheus
+    static_configs: [{targets: [prometheus:9090]}]
+  - job_name: order-service
+    metrics_path: /actuator/prometheus
+    static_configs: [{targets: [order-service:8080]}]
+  - job_name: payment-service
+    metrics_path: /actuator/prometheus
+    static_configs: [{targets: [payment-service:8081]}]

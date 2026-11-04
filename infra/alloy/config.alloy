@@ -1,0 +1,21 @@
+// Docker discovery feeds container stdout to Loki; only service and level become labels.
+discovery.docker "local" {
+  host = "unix:///var/run/docker.sock"
+}
+loki.source.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  targets = discovery.docker.local.targets
+  labels = { job = "docker" }
+  forward_to = [loki.process.containers.receiver]
+}
+loki.process "containers" {
+  stage.docker {}
+  stage.json {
+    expressions = { level = "level", service = "service", trace_id = "traceId", span_id = "spanId" }
+  }
+  stage.labels { values = { level = "level", service_name = "service" } }
+  forward_to = [loki.write.local.receiver]
+}
+loki.write "local" {
+  endpoint { url = "http://loki:3100/loki/api/v1/push" }
+}
